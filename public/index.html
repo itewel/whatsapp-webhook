@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>لوحة تحكم واتساب</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI',Arial,sans-serif; background:#0a1628; color:#e8edf5; min-height:100vh; display:flex; flex-direction:column; }
+  .header { background:#0d1f3c; padding:14px 20px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #1e3a5f; }
+  .header-left { display:flex; align-items:center; gap:10px; }
+  .logo { width:34px; height:34px; background:#25D366; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:18px; }
+  .header h1 { font-size:16px; font-weight:600; }
+  .header p { font-size:11px; color:#7a9bbf; }
+  .status { background:#0d2e1a; border:1px solid #25D366; color:#25D366; padding:4px 10px; border-radius:20px; font-size:11px; display:flex; align-items:center; gap:5px; }
+  .dot { width:6px; height:6px; background:#25D366; border-radius:50%; animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
+  .main { display:flex; flex:1; overflow:hidden; }
+  .sidebar { width:280px; background:#0d1f3c; border-left:1px solid #1e3a5f; display:flex; flex-direction:column; flex-shrink:0; }
+  .sidebar-header { padding:14px 16px; border-bottom:1px solid #1e3a5f; display:flex; justify-content:space-between; align-items:center; }
+  .sidebar-header h3 { font-size:13px; font-weight:600; }
+  .refresh { background:none; border:1px solid #1e3a5f; color:#7a9bbf; border-radius:6px; padding:4px 10px; font-size:11px; cursor:pointer; }
+  .refresh:hover { border-color:#25D366; color:#25D366; }
+  .conv-list { overflow-y:auto; flex:1; }
+  .conv-item { padding:12px 14px; border-bottom:1px solid #0f2540; cursor:pointer; display:flex; gap:10px; align-items:center; transition:background .15s; }
+  .conv-item:hover { background:#122a4a; }
+  .conv-item.active { background:#0f3a6e; border-right:3px solid #25D366; }
+  .conv-avatar { width:38px; height:38px; background:#1e3a5f; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0; }
+  .conv-info { flex:1; min-width:0; }
+  .conv-name { font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .conv-preview { font-size:11px; color:#7a9bbf; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  .conv-badge { background:#25D366; color:#fff; border-radius:10px; padding:1px 7px; font-size:10px; font-weight:700; flex-shrink:0; }
+  .chat { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+  .chat-header { padding:14px 18px; background:#0d1f3c; border-bottom:1px solid #1e3a5f; display:flex; align-items:center; gap:10px; }
+  .chat-header .avatar { width:36px; height:36px; background:#1e3a5f; border-radius:50%; display:flex; align-items:center; justify-content:center; }
+  .chat-name { font-size:14px; font-weight:600; }
+  .chat-phone { font-size:11px; color:#7a9bbf; }
+  .messages { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+  .msg { max-width:65%; }
+  .msg.in { align-self:flex-start; }
+  .msg.out { align-self:flex-end; }
+  .bubble { padding:9px 13px; border-radius:12px; font-size:13px; line-height:1.5; word-break:break-word; }
+  .in .bubble { background:#0d1f3c; border:1px solid #1e3a5f; border-radius:12px 12px 12px 2px; }
+  .out .bubble { background:#075e3a; border-radius:12px 12px 2px 12px; }
+  .msg-time { font-size:10px; color:#3a5a7f; margin-top:3px; padding:0 3px; }
+  .out .msg-time { text-align:left; }
+  .empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#3a5a7f; gap:10px; }
+  .empty-icon { font-size:42px; opacity:.3; }
+  .reply { padding:12px 16px; border-top:1px solid #1e3a5f; display:flex; gap:8px; background:#0d1f3c; }
+  .reply textarea { flex:1; background:#0a1628; border:1px solid #1e3a5f; border-radius:8px; padding:9px 12px; color:#e8edf5; font-size:13px; outline:none; resize:none; font-family:inherit; min-height:38px; max-height:80px; }
+  .reply textarea:focus { border-color:#25D366; }
+  .reply textarea::placeholder { color:#3a5a7f; }
+  .send { background:#25D366; border:none; border-radius:8px; width:38px; height:38px; cursor:pointer; font-size:16px; flex-shrink:0; }
+  .send:hover { background:#1db954; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); padding:9px 18px; border-radius:8px; font-size:12px; opacity:0; transition:opacity .3s; pointer-events:none; z-index:999; }
+  .toast.show { opacity:1; }
+  .loading-msg { color:#3a5a7f; font-size:12px; text-align:center; padding:20px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-left">
+    <div class="logo">💬</div>
+    <div>
+      <h1>لوحة تحكم واتساب</h1>
+      <p>WhatsApp Business Dashboard</p>
+    </div>
+  </div>
+  <div class="status"><div class="dot"></div><span id="statusText">جاري التحميل...</span></div>
+</div>
+<div class="main">
+  <div class="chat" id="chatArea">
+    <div class="empty">
+      <div class="empty-icon">💬</div>
+      <p>اختر محادثة من القائمة</p>
+    </div>
+  </div>
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h3>المحادثات <span id="convCount" style="color:#7a9bbf;font-weight:400"></span></h3>
+      <button class="refresh" onclick="loadConversations()">🔄 تحديث</button>
+    </div>
+    <div class="conv-list" id="convList">
+      <div class="loading-msg">جاري تحميل الرسائل...</div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const SERVER = '';
+let activePhone = null;
+let conversations = {};
+let autoRefresh = null;
+
+async function loadConversations() {
+  try {
+    const res = await fetch(SERVER + '/api/messages');
+    if (!res.ok) throw new Error('فشل الاتصال');
+    const data = await res.json();
+    conversations = {};
+    data.conversations.forEach(c => { conversations[c.phone] = c; });
+    document.getElementById('statusText').textContent = 'متصل ✓';
+    document.getElementById('convCount').textContent = '(' + data.conversations.length + ')';
+    renderConversations();
+    if (activePhone && conversations[activePhone]) renderChat(activePhone);
+  } catch(e) {
+    document.getElementById('statusText').textContent = 'خطأ في الاتصال';
+    document.getElementById('convList').innerHTML = '<div class="loading-msg" style="color:#e05c5c">❌ ' + e.message + '</div>';
+  }
+}
+
+function renderConversations() {
+  const list = document.getElementById('convList');
+  const keys = Object.keys(conversations);
+  if (keys.length === 0) { list.innerHTML = '<div class="loading-msg">لا توجد رسائل بعد</div>'; return; }
+  list.innerHTML = keys.map(phone => {
+    const c = conversations[phone];
+    const last = c.messages[c.messages.length - 1];
+    const preview = last ? (last.text || '[' + last.type + ']') : '...';
+    const count = c.messages.filter(m => m.direction === 'incoming').length;
+    return '<div class="conv-item ' + (activePhone === phone ? 'active' : '') + '" onclick="openConv(\'' + phone + '\')">' +
+      '<div class="conv-avatar">👤</div>' +
+      '<div class="conv-info"><div class="conv-name">' + (c.name || phone) + '</div>' +
+      '<div class="conv-preview">' + preview + '</div></div>' +
+      (count > 0 ? '<div class="conv-badge">' + count + '</div>' : '') +
+      '</div>';
+  }).join('');
+}
+
+function openConv(phone) {
+  activePhone = phone;
+  renderConversations();
+  renderChat(phone);
+}
+
+function renderChat(phone) {
+  const c = conversations[phone];
+  const area = document.getElementById('chatArea');
+  area.innerHTML = '<div class="chat-header"><div class="avatar">👤</div><div>' +
+    '<div class="chat-name">' + (c.name || phone) + '</div>' +
+    '<div class="chat-phone">' + phone + '</div></div></div>' +
+    '<div class="messages" id="msgs">' +
+    c.messages.map(m => {
+      const dir = m.direction === 'outgoing' ? 'out' : 'in';
+      const text = m.text || '[' + m.type + ']';
+      const time = m.timestamp ? new Date(m.timestamp * 1000).toLocaleTimeString('ar', {hour:'2-digit',minute:'2-digit'}) : '';
+      return '<div class="msg ' + dir + '"><div class="bubble">' + text + '</div><div class="msg-time">' + time + '</div></div>';
+    }).join('') + '</div>' +
+    '<div class="reply"><textarea id="replyText" placeholder="اكتب ردك..." onkeydown="handleKey(event)"></textarea>' +
+    '<button class="send" onclick="sendMsg(\'' + phone + '\')">➤</button></div>';
+  const msgs = document.getElementById('msgs');
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+}
+
+async function sendMsg(phone) {
+  const el = document.getElementById('replyText');
+  const text = el ? el.value.trim() : '';
+  if (!text) return;
+  try {
+    const res = await fetch(SERVER + '/api/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: phone, text })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    el.value = '';
+    showToast('✅ تم الإرسال');
+    setTimeout(loadConversations, 1000);
+  } catch(e) { showToast('❌ ' + e.message, true); }
+}
+
+function handleKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(activePhone); } }
+
+function showToast(msg, err) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.cssText = 'background:' + (err ? '#2e0d0d' : '#0d2e1a') + ';border:1px solid ' + (err ? '#e05c5c' : '#25D366') + ';color:' + (err ? '#e05c5c' : '#25D366');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+loadConversations();
+autoRefresh = setInterval(loadConversations, 10000);
+</script>
+</body>
+</html>
