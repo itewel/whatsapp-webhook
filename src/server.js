@@ -11,37 +11,50 @@ const CONFIG = {
   APP_SECRET: process.env.APP_SECRET || "YOUR_APP_SECRET",
   WHATSAPP_TOKEN: process.env.WHATSAPP_TOKEN || "YOUR_WHATSAPP_TOKEN",
   PHONE_NUMBER_ID: process.env.PHONE_NUMBER_ID || "YOUR_PHONE_NUMBER_ID",
-  LOG_DIR: path.join(__dirname, "../logs"),
+  DATA_DIR: path.join(__dirname, "../data"),
 };
 
-function log(level, message, data = null) {
-  const timestamp = new Date().toISOString();
-  const entry = { timestamp, level, message, ...(data && { data }) };
-  console.log(JSON.stringify(entry));
-  try {
-    if (!fs.existsSync(CONFIG.LOG_DIR)) fs.mkdirSync(CONFIG.LOG_DIR, { recursive: true });
-    const logFile = path.join(CONFIG.LOG_DIR, `${new Date().toISOString().slice(0, 10)}.log`);
-    fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
-  } catch (e) {}
+// ─── Storage ────────────────────────────────────────────────────────────────
+function getMessagesFile() {
+  return path.join(CONFIG.DATA_DIR, "messages.json");
 }
 
+function loadMessages() {
+  try {
+    if (!fs.existsSync(CONFIG.DATA_DIR)) fs.mkdirSync(CONFIG.DATA_DIR, { recursive: true });
+    if (!fs.existsSync(getMessagesFile())) fs.writeFileSync(getMessagesFile(), "[]");
+    return JSON.parse(fs.readFileSync(getMessagesFile(), "utf8"));
+  } catch { return []; }
+}
+
+function saveMessage(msg) {
+  const messages = loadMessages();
+  messages.push(msg);
+  // Keep last 1000 messages only
+  const trimmed = messages.slice(-1000);
+  fs.writeFileSync(getMessagesFile(), JSON.stringify(trimmed, null, 2));
+}
+
+// ─── Logging ────────────────────────────────────────────────────────────────
+function log(level, message, data = null) {
+  const entry = { timestamp: new Date().toISOString(), level, message, ...(data && { data }) };
+  console.log(JSON.stringify(entry));
+}
+
+// ─── Rate Limiting ───────────────────────────────────────────────────────────
 const rateLimitMap = new Map();
 function rateLimit(req, res, next) {
   const ip = req.ip;
   const now = Date.now();
-  const windowMs = 60 * 1000;
-  const maxRequests = 100;
   const record = rateLimitMap.get(ip) || { count: 0, start: now };
-  if (now - record.start > windowMs) { record.count = 0; record.start = now; }
+  if (now - record.start > 60000) { record.count = 0; record.start = now; }
   record.count++;
   rateLimitMap.set(ip, record);
-  if (record.count > maxRequests) {
-    log("WARN", "Rate limit exceeded", { ip });
-    return res.status(429).json({ error: "Too many requests" });
-  }
+  if (record.count > 100) return res.status(429).json({ error: "Too many requests" });
   next();
 }
 
+// ─── Signature Verification ──────────────────────────────────────────────────
 function verifySignature(req, res, buf) {
   const signature = req.headers["x-hub-signature-256"];
   if (!signature) return;
@@ -51,12 +64,12 @@ function verifySignature(req, res, buf) {
   }
 }
 
+// ─── Middleware ──────────────────────────────────────────────────────────────
 app.use(rateLimit);
 app.use(express.json({
   verify: (req, res, buf) => {
     try { verifySignature(req, res, buf); }
     catch {
-      log("WARN", "Signature verification failed", { ip: req.ip });
       const err = new Error("Forbidden");
       err.status = 403;
       throw err;
@@ -67,20 +80,22 @@ app.use(express.json({
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   next();
 });
 
+// ─── Webhook Verification ────────────────────────────────────────────────────
 app.get("/webhook", (req, res) => {
   const { "hub.mode": mode, "hub.verify_token": token, "hub.challenge": challenge } = req.query;
   if (mode === "subscribe" && token === CONFIG.VERIFY_TOKEN) {
-    log("INFO", "Webhook verified successfully");
+    log("INFO", "Webhook verified");
     return res.status(200).send(challenge);
   }
-  log("WARN", "Webhook verification failed", { mode, token });
   res.sendStatus(403);
 });
 
+// ─── Webhook Events ──────────────────────────────────────────────────────────
 app.post("/webhook", (req, res) => {
   res.sendStatus(200);
   const body = req.body;
@@ -89,46 +104,49 @@ app.post("/webhook", (req, res) => {
     for (const change of entry.changes || []) {
       const value = change.value;
       for (const msg of value.messages || []) {
-        handleMessage(msg, value.metadata, value.contacts);
+        const contact = value.contacts?.[0];
+        const name = contact?.profile?.name || msg.from;
+        const stored = {
+          id: msg.id,
+          from: msg.from,
+          name,
+          type: msg.type,
+          text: msg.text?.body || null,
+          timestamp: msg.timestamp,
+          receivedAt: new Date().toISOString(),
+          direction: "incoming",
+        };
+        saveMessage(stored);
+        log("INFO", `New message from ${name}`, { from: msg.from, text: msg.text?.body });
       }
       for (const status of value.statuses || []) {
-        handleStatus(status);
+        log("INFO", `Message ${status.status}`, { id: status.id });
       }
     }
   }
 });
 
-function handleMessage(msg, metadata, contacts) {
-  const contact = contacts?.[0];
-  const name = contact?.profile?.name || "Unknown";
-  const from = msg.from;
-  const type = msg.type;
-  log("INFO", `New message from ${name}`, { from, type });
-  switch (type) {
-    case "text":
-      sendReply(from, `مرحباً ${name}! استلمنا رسالتك: "${msg.text.body}"`);
-      break;
-    case "image":
-      sendReply(from, `استلمنا صورتك بنجاح!`);
-      break;
-    case "audio":
-      sendReply(from, `استلمنا رسالتك الصوتية!`);
-      break;
-    case "document":
-      sendReply(from, `استلمنا المستند: ${msg.document.filename}`);
-      break;
-    default:
-      log("INFO", `Unhandled message type: ${type}`);
-  }
-}
+// ─── API: Get Messages ───────────────────────────────────────────────────────
+app.get("/api/messages", (req, res) => {
+  const messages = loadMessages();
+  // Group by conversation (phone number)
+  const conversations = {};
+  messages.forEach(msg => {
+    const phone = msg.from || msg.to;
+    if (!conversations[phone]) {
+      conversations[phone] = { phone, name: msg.name || phone, messages: [] };
+    }
+    conversations[phone].messages.push(msg);
+  });
+  res.json({ conversations: Object.values(conversations), total: messages.length });
+});
 
-function handleStatus(status) {
-  log("INFO", `Message ${status.status}`, { msgId: status.id });
-}
-
-async function sendReply(to, text) {
+// ─── API: Send Message ───────────────────────────────────────────────────────
+app.post("/api/send", async (req, res) => {
+  const { to, text } = req.body;
+  if (!to || !text) return res.status(400).json({ error: "to and text required" });
   try {
-    const res = await fetch(
+    const response = await fetch(
       `https://graph.facebook.com/v19.0/${CONFIG.PHONE_NUMBER_ID}/messages`,
       {
         method: "POST",
@@ -144,23 +162,31 @@ async function sendReply(to, text) {
         }),
       }
     );
-    const data = await res.json();
-    if (!res.ok) throw new Error(JSON.stringify(data));
-    log("INFO", "Reply sent", { to });
+    const data = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(data));
+    // Save sent message
+    saveMessage({
+      id: data.messages?.[0]?.id,
+      to,
+      from: CONFIG.PHONE_NUMBER_ID,
+      type: "text",
+      text,
+      timestamp: Math.floor(Date.now() / 1000),
+      receivedAt: new Date().toISOString(),
+      direction: "outgoing",
+    });
+    res.json({ success: true, messageId: data.messages?.[0]?.id });
   } catch (err) {
-    log("ERROR", "Failed to send reply", { to, error: err.message });
+    res.status(500).json({ error: err.message });
   }
-}
+});
 
+// ─── Health ──────────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", uptime: process.uptime(), timestamp: new Date().toISOString() });
+  res.json({ status: "ok", uptime: process.uptime(), messages: loadMessages().length });
 });
 
-app.use((err, req, res, next) => {
-  log("ERROR", err.message);
-  res.status(err.status || 500).json({ error: err.message || "Internal server error" });
-});
-
+// ─── Start ───────────────────────────────────────────────────────────────────
 app.listen(CONFIG.PORT, () => {
   log("INFO", `Webhook server running on port ${CONFIG.PORT}`);
 });
