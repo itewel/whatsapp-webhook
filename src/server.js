@@ -180,7 +180,7 @@ app.post("/api/send", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+app.use(express.static(path.join(__dirname, "../public")));
 // ─── Health ──────────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
   res.json({ status: "ok", uptime: process.uptime(), messages: loadMessages().length });
